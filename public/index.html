@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>India Live News</title>
+    <link rel="stylesheet" href="/styles.css?v=source-tabs">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Live RSS dashboard</p>
+        <h1>India Live News</h1>
+      </div>
+      <button id="refreshButton" class="icon-button" type="button" title="Refresh news" aria-label="Refresh news">
+        <span aria-hidden="true">R</span>
+      </button>
+    </header>
+
+    <main class="app-shell">
+      <section class="controls" aria-label="News controls">
+        <label class="search-box">
+          <span>Search</span>
+          <input id="searchInput" type="search" placeholder="Politics, market, cricket...">
+        </label>
+
+        <label class="select-box">
+          <span>Source</span>
+          <select id="sourceSelect">
+            <option value="all">All sources</option>
+          </select>
+        </label>
+
+        <div class="status-panel">
+          <strong id="headlineCount">Loading...</strong>
+          <span id="lastUpdated">Fetching latest RSS stories</span>
+        </div>
+
+        <div class="category-box" aria-label="Category filter">
+          <span>Category</span>
+          <div class="category-buttons" role="group" aria-label="Choose category">
+            <button class="category-button active" type="button" data-category="all">All</button>
+            <button class="category-button" type="button" data-category="India">India</button>
+            <button class="category-button" type="button" data-category="Bollywood">Bollywood</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="source-strip" id="sourceStrip" aria-label="Source status"></section>
+
+      <section class="content-grid">
+        <div>
+          <div class="section-title">
+            <h2>Top stories</h2>
+            <span id="activeFilter">All sources</span>
+          </div>
+          <div id="newsList" class="news-list" aria-live="polite"></div>
+        </div>
+
+        <aside class="briefing" aria-label="Quick briefing">
+          <h2>Quick briefing</h2>
+          <div id="briefingList" class="briefing-list"></div>
+        </aside>
+      </section>
+    </main>
+
+    <script src="/app.js?v=source-tabs-stable" type="module"></script>
+  </body>
+</html>
