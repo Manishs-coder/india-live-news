@@ -81,6 +81,9 @@ const feeds = [
 
 const cache = new Map();
 const CACHE_MS = 30 * 1000;
+const STORIES_PER_SOURCE = 25;
+const AUTHOR_SOURCE_HOURLY_LIMIT = 5;
+const HOUR_MS = 60 * 60 * 1000;
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -184,6 +187,38 @@ function sendJson(res, status, payload) {
     "cache-control": "no-store"
   });
   res.end(JSON.stringify(payload));
+}
+
+function portalKeyFromLink(link = "") {
+  try {
+    return new URL(link).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function addRewriteStatus(newsPayload, rewrites) {
+  const rewritesByLink = new Map();
+  for (const rewrite of rewrites) {
+    const existing = rewritesByLink.get(rewrite.sourceLink);
+    if (!existing || new Date(rewrite.updatedAt) > new Date(existing.updatedAt)) {
+      rewritesByLink.set(rewrite.sourceLink, rewrite);
+    }
+  }
+
+  return {
+    ...newsPayload,
+    items: newsPayload.items.map((item) => {
+      const rewrite = rewritesByLink.get(item.link);
+      if (!rewrite) return item;
+      return {
+        ...item,
+        rewrittenBy: rewrite.createdBy,
+        rewrittenAt: rewrite.updatedAt,
+        rewrittenTitle: rewrite.title
+      };
+    })
+  };
 }
 
 function redirect(res, location) {
@@ -330,6 +365,30 @@ function stripHtml(value = "") {
     .trim();
 }
 
+function extractArticleText(html = "") {
+  const candidates = [];
+  const articleMatch = html.match(/<article\b[\s\S]*?<\/article>/i);
+  if (articleMatch) candidates.push(articleMatch[0]);
+
+  const mainMatch = html.match(/<main\b[\s\S]*?<\/main>/i);
+  if (mainMatch) candidates.push(mainMatch[0]);
+
+  candidates.push(html);
+
+  for (const candidate of candidates) {
+    const paragraphs = [...candidate.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)]
+      .map((match) => stripHtml(match[1]))
+      .filter((text) => text.length > 45)
+      .filter((text) => !/subscribe|advertisement|read more|follow us|sign in/i.test(text));
+
+    const uniqueParagraphs = [...new Set(paragraphs)].slice(0, 18);
+    const text = uniqueParagraphs.join("\n\n").trim();
+    if (text.length > 400) return text;
+  }
+
+  return "";
+}
+
 function getTag(xml, tag) {
   const match = xml.match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, "i"));
   return match ? decodeEntities(match[1]).trim() : "";
@@ -395,7 +454,7 @@ async function fetchFeed(feed, forceRefresh = false) {
   const result = {
     feed,
     fetchedAt: Date.now(),
-    items: parseRss(xml, feed).slice(0, 25),
+    items: parseRss(xml, feed).slice(0, STORIES_PER_SOURCE),
     error: null
   };
   cache.set(feed.id, result);
@@ -600,9 +659,51 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/api/news") {
     try {
       const payload = await getNews(url);
-      sendJson(res, 200, payload);
+      const rewriteStore = await loadRewrites();
+      sendJson(res, 200, addRewriteStatus(payload, rewriteStore.rewrites));
     } catch (error) {
       sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  if (url.pathname === "/api/article" && req.method === "GET") {
+    const articleUrl = url.searchParams.get("url") || "";
+    let parsedArticleUrl;
+
+    try {
+      parsedArticleUrl = new URL(articleUrl);
+    } catch {
+      sendJson(res, 400, { error: "Invalid article URL" });
+      return;
+    }
+
+    if (!["http:", "https:"].includes(parsedArticleUrl.protocol)) {
+      sendJson(res, 400, { error: "Invalid article URL" });
+      return;
+    }
+
+    try {
+      const response = await fetch(parsedArticleUrl, {
+        headers: {
+          "user-agent": "Mozilla/5.0 IndiaLiveNewsRewriteDesk/1.0",
+          accept: "text/html,application/xhtml+xml"
+        },
+        signal: AbortSignal.timeout(12000)
+      });
+
+      if (!response.ok) throw new Error(`Article returned ${response.status}`);
+
+      const html = await response.text();
+      const text = extractArticleText(html);
+      if (!text) {
+        sendJson(res, 422, { error: "Full article text was not available from this source" });
+        return;
+      }
+
+      sendJson(res, 200, { text: text.slice(0, 12000), sourceUrl: parsedArticleUrl.toString() });
+    } catch (error) {
+      sendJson(res, 502, { error: "Could not load full article from this source" });
     }
     return;
   }
@@ -633,6 +734,33 @@ const server = http.createServer(async (req, res) => {
       const store = await loadRewrites();
       const now = new Date().toISOString();
       const existing = store.rewrites.find((item) => item.sourceLink === sourceLink && item.createdBy === currentUser.username);
+      const alreadyRewritten = store.rewrites.find((item) => item.sourceLink === sourceLink && item.createdBy !== currentUser.username);
+      const sourcePortal = portalKeyFromLink(sourceLink);
+      const sourceLabel = sourceName || sourcePortal;
+
+      if (!existing && alreadyRewritten) {
+        sendJson(res, 409, {
+          error: `Already rewritten by ${alreadyRewritten.createdBy}. Please choose another story.`
+        });
+        return;
+      }
+
+      if (!existing && currentUser.role === "author") {
+        const cutoff = Date.now() - HOUR_MS;
+        const recentSourceCount = store.rewrites.filter((item) => (
+          item.createdBy === currentUser.username
+          && (item.sourcePortal || portalKeyFromLink(item.sourceLink) || item.sourceName || "") === sourcePortal
+          && new Date(item.createdAt || item.updatedAt || 0).getTime() >= cutoff
+        )).length;
+
+        if (recentSourceCount >= AUTHOR_SOURCE_HOURLY_LIMIT) {
+          sendJson(res, 429, {
+            error: `Limit reached: this author can save only ${AUTHOR_SOURCE_HOURLY_LIMIT} stories from ${sourceLabel} in 1 hour`
+          });
+          return;
+        }
+      }
+
       const rewrite = {
         id: existing?.id || crypto.randomBytes(10).toString("hex"),
         title,
@@ -640,6 +768,7 @@ const server = http.createServer(async (req, res) => {
         sourceTitle,
         sourceLink,
         sourceName,
+        sourcePortal,
         category,
         image,
         createdBy: existing?.createdBy || currentUser.username,

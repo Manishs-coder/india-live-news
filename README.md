@@ -11,6 +11,8 @@ Live RSS news dashboard for Indian news and Bollywood sources.
 - Mobile-friendly layout
 - Rewrite desk for authors
 - Saved rewritten stories with copy-ready website text
+- Authors can save up to 5 rewrites per source per hour
+- Stories already rewritten by any author are marked and blocked for other authors
 
 ## Run locally
 

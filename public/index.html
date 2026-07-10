@@ -72,6 +72,7 @@
                 Rewritten story
                 <textarea id="rewriteBody" name="body" rows="8" placeholder="Write the story in your own words..." required></textarea>
               </label>
+              <button id="loadArticleButton" class="secondary-action" type="button">Load full article</button>
               <label>
                 Source link
                 <input id="rewriteSource" name="source" readonly>
@@ -91,6 +92,14 @@
         </aside>
       </section>
     </main>
+
+    <div id="appPopup" class="popup-backdrop" hidden>
+      <section class="popup-card" role="alertdialog" aria-modal="true" aria-labelledby="popupTitle" aria-describedby="popupMessage">
+        <h2 id="popupTitle">Notice</h2>
+        <p id="popupMessage"></p>
+        <button id="popupCloseButton" type="button">OK</button>
+      </section>
+    </div>
 
     <script src="/app.js?v=rewrite-desk" type="module"></script>
   </body>

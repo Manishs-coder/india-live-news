@@ -15,7 +15,12 @@ const rewriteSource = document.querySelector("#rewriteSource");
 const rewriteStatus = document.querySelector("#rewriteStatus");
 const saveRewriteButton = document.querySelector("#saveRewriteButton");
 const copyRewriteButton = document.querySelector("#copyRewriteButton");
+const loadArticleButton = document.querySelector("#loadArticleButton");
 const savedRewrites = document.querySelector("#savedRewrites");
+const appPopup = document.querySelector("#appPopup");
+const popupTitle = document.querySelector("#popupTitle");
+const popupMessage = document.querySelector("#popupMessage");
+const popupCloseButton = document.querySelector("#popupCloseButton");
 
 const AUTO_REFRESH_MS = 30 * 1000;
 let feeds = [];
@@ -48,6 +53,17 @@ function escapeHtml(value = "") {
     '"': "&quot;",
     "'": "&#39;"
   })[char]);
+}
+
+function showPopup(title, message) {
+  popupTitle.textContent = title;
+  popupMessage.textContent = message;
+  appPopup.hidden = false;
+  popupCloseButton.focus();
+}
+
+function hidePopup() {
+  appPopup.hidden = true;
 }
 
 function renderSources(sources) {
@@ -90,7 +106,9 @@ function renderNews(items) {
     return;
   }
 
-  newsList.innerHTML = items.map((item) => `
+  newsList.innerHTML = items.map((item) => {
+    const alreadyRewritten = Boolean(item.rewrittenBy);
+    return `
     <article class="news-card ${item.image ? "" : "no-image"}">
       <div>
         <div class="meta">
@@ -98,16 +116,22 @@ function renderNews(items) {
           <span>${escapeHtml(item.language)}</span>
           <span>${relativeTime(item.publishedAt)}</span>
         </div>
+        ${alreadyRewritten ? `
+          <div class="rewrite-badge">Already rewritten by ${escapeHtml(item.rewrittenBy)}</div>
+        ` : ""}
         <h3><a href="${item.link}" target="_blank" rel="noreferrer">${escapeHtml(item.title)}</a></h3>
         <p>${escapeHtml(trimText(item.description, 220))}</p>
         <div class="story-actions">
-          <button class="rewrite-button" type="button" data-story-id="${escapeHtml(item.id)}">Rewrite</button>
+          <button class="rewrite-button" type="button" data-story-id="${escapeHtml(item.id)}" ${alreadyRewritten ? "disabled" : ""}>
+            ${alreadyRewritten ? "Already rewritten" : "Rewrite"}
+          </button>
           <a href="${item.link}" target="_blank" rel="noreferrer">Source</a>
         </div>
       </div>
       ${item.image ? `<img class="thumbnail" src="${item.image}" alt="">` : ""}
     </article>
-  `).join("");
+  `;
+  }).join("");
 
   briefingList.innerHTML = items.slice(0, 6).map((item) => `
     <div class="briefing-item">
@@ -240,6 +264,7 @@ sourceStrip.addEventListener("click", (event) => {
 newsList.addEventListener("click", (event) => {
   const button = event.target.closest(".rewrite-button[data-story-id]");
   if (!button) return;
+  if (button.disabled) return;
   const item = latestItems.find((story) => story.id === button.dataset.storyId);
   if (item) selectStoryForRewrite(item);
 });
@@ -274,11 +299,14 @@ rewriteForm.addEventListener("submit", async (event) => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload)
     });
-    if (!response.ok) throw new Error("Save failed");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Save failed");
     rewriteStatus.textContent = "Rewrite saved";
     await loadRewrites();
-  } catch {
-    rewriteStatus.textContent = "Could not save";
+    await loadNews(false);
+  } catch (error) {
+    rewriteStatus.textContent = error.message;
+    showPopup(error.message.includes("Limit reached") ? "Hourly limit reached" : "Could not save", error.message);
   } finally {
     saveRewriteButton.disabled = false;
   }
@@ -292,7 +320,38 @@ copyRewriteButton.addEventListener("click", async () => {
   await navigator.clipboard.writeText(formattedRewrite(payload));
   rewriteStatus.textContent = "Copied for website";
 });
+loadArticleButton.addEventListener("click", async () => {
+  const sourceLink = selectedStory?.link || rewriteSource.value.trim();
+  if (!sourceLink) {
+    rewriteStatus.textContent = "Select a story first";
+    return;
+  }
+
+  loadArticleButton.disabled = true;
+  rewriteStatus.textContent = "Loading full article...";
+
+  try {
+    const response = await fetch(`/api/article?url=${encodeURIComponent(sourceLink)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Full article not available");
+
+    rewriteBody.value = data.text;
+    rewriteStatus.textContent = "Full article loaded";
+    rewriteBody.focus();
+  } catch (error) {
+    rewriteStatus.textContent = error.message;
+  } finally {
+    loadArticleButton.disabled = false;
+  }
+});
 
 loadNews();
 loadRewrites();
 setInterval(() => loadNews(false), AUTO_REFRESH_MS);
+popupCloseButton.addEventListener("click", hidePopup);
+appPopup.addEventListener("click", (event) => {
+  if (event.target === appPopup) hidePopup();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !appPopup.hidden) hidePopup();
+});
