@@ -1,6 +1,7 @@
 .agents/
 .codex/
 .env
+data/
 node_modules/
 outputs/
 work/

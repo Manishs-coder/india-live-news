@@ -1,10 +1,16 @@
 import http from "node:http";
-import { readFile } from "node:fs/promises";
+import crypto from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
+const ADMIN_USER = process.env.ADMIN_USER || "admin";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
+const USERS_FILE = process.env.USERS_FILE || path.join(DATA_DIR, "users.json");
+const SESSION_COOKIE = "news_session";
 
 const feeds = [
   {
@@ -81,6 +87,199 @@ const mimeTypes = {
   ".js": "application/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8"
 };
+
+const sessions = new Map();
+let usersCache = null;
+
+function escapeHtml(value = "") {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[char]);
+}
+
+function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, storedHash) {
+  const [salt, hash] = storedHash.split(":");
+  if (!salt || !hash) return false;
+  const candidate = crypto.scryptSync(password, salt, 64);
+  const expected = Buffer.from(hash, "hex");
+  return expected.length === candidate.length && crypto.timingSafeEqual(expected, candidate);
+}
+
+async function loadUsers() {
+  if (usersCache) return usersCache;
+
+  try {
+    usersCache = JSON.parse(await readFile(USERS_FILE, "utf8"));
+  } catch {
+    usersCache = {
+      users: ADMIN_PASSWORD ? [
+        {
+          username: ADMIN_USER,
+          role: "admin",
+          passwordHash: hashPassword(ADMIN_PASSWORD),
+          createdAt: new Date().toISOString()
+        }
+      ] : []
+    };
+    await saveUsers();
+  }
+
+  return usersCache;
+}
+
+async function saveUsers() {
+  await mkdir(path.dirname(USERS_FILE), { recursive: true });
+  await writeFile(USERS_FILE, JSON.stringify(usersCache, null, 2));
+}
+
+function parseCookies(req) {
+  return Object.fromEntries((req.headers.cookie || "")
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .filter(Boolean)
+    .map((cookie) => {
+      const index = cookie.indexOf("=");
+      return [cookie.slice(0, index), decodeURIComponent(cookie.slice(index + 1))];
+    }));
+}
+
+async function readBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function redirect(res, location) {
+  res.writeHead(302, { location, "cache-control": "no-store" });
+  res.end();
+}
+
+async function getCurrentUser(req) {
+  const token = parseCookies(req)[SESSION_COOKIE];
+  if (!token) return null;
+  const session = sessions.get(token);
+  if (!session) return null;
+
+  const store = await loadUsers();
+  return store.users.find((user) => user.username === session.username) || null;
+}
+
+async function requireUser(req, res) {
+  if (!ADMIN_PASSWORD) return { username: "local", role: "admin" };
+
+  const user = await getCurrentUser(req);
+  if (user) return user;
+
+  if ((req.headers.accept || "").includes("application/json") || req.url.startsWith("/api/")) {
+    res.writeHead(401, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+    res.end(JSON.stringify({ error: "Login required" }));
+    return null;
+  }
+
+  redirect(res, "/login");
+  return null;
+}
+
+function renderLogin(error = "") {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Login - India Live News</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f5f2ec; color: #182027; font-family: system-ui, sans-serif; }
+    form { width: min(380px, calc(100% - 32px)); display: grid; gap: 12px; padding: 22px; border: 1px solid #ded8ce; border-radius: 8px; background: #fffdf8; box-shadow: 0 16px 36px rgba(26,31,36,.08); }
+    h1 { margin: 0 0 8px; font-size: 1.45rem; }
+    label { display: grid; gap: 6px; font-weight: 700; color: #69737c; font-size: .86rem; }
+    input, button { min-height: 40px; border-radius: 6px; font: inherit; }
+    input { border: 1px solid #ded8ce; padding: 0 10px; }
+    button { border: 0; background: #126f75; color: white; font-weight: 800; cursor: pointer; }
+    .error { color: #a54817; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <form method="post" action="/login">
+    <h1>India Live News Login</h1>
+    ${error ? `<div class="error">${escapeHtml(error)}</div>` : ""}
+    <label>Username <input name="username" autocomplete="username" required></label>
+    <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+    <button type="submit">Login</button>
+  </form>
+</body>
+</html>`;
+}
+
+function renderAdmin(user, users, message = "") {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin - India Live News</title>
+  <style>
+    body { margin: 0; background: #f5f2ec; color: #182027; font-family: system-ui, sans-serif; }
+    main { width: min(920px, calc(100% - 32px)); margin: 28px auto; display: grid; gap: 18px; }
+    section { border: 1px solid #ded8ce; border-radius: 8px; background: #fffdf8; padding: 16px; box-shadow: 0 16px 36px rgba(26,31,36,.08); }
+    h1, h2 { margin: 0 0 12px; }
+    form { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: end; }
+    label { display: grid; gap: 6px; color: #69737c; font-size: .84rem; font-weight: 800; }
+    input, select, button { min-height: 38px; border-radius: 6px; font: inherit; }
+    input, select { border: 1px solid #ded8ce; padding: 0 10px; background: white; }
+    button { border: 0; background: #126f75; color: white; font-weight: 800; cursor: pointer; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px; border-bottom: 1px solid #ded8ce; }
+    nav { display: flex; gap: 10px; justify-content: space-between; align-items: center; }
+    a { color: #126f75; font-weight: 800; }
+    .message { color: #287044; font-weight: 800; }
+    @media (max-width: 760px) { form { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <nav>
+      <div>Logged in as <strong>${escapeHtml(user.username)}</strong></div>
+      <div><a href="/">Dashboard</a> <a href="/logout">Logout</a></div>
+    </nav>
+    <section>
+      <h1>Admin Users</h1>
+      ${message ? `<p class="message">${escapeHtml(message)}</p>` : ""}
+      <form method="post" action="/admin/users">
+        <label>Username <input name="username" required></label>
+        <label>Password <input name="password" type="password" required></label>
+        <label>Role
+          <select name="role">
+            <option value="agent">Agent</option>
+            <option value="author">Author</option>
+            <option value="freelancer">Freelancer</option>
+            <option value="admin">Admin</option>
+          </select>
+        </label>
+        <button type="submit">Create login</button>
+      </form>
+    </section>
+    <section>
+      <h2>Existing logins</h2>
+      <table>
+        <thead><tr><th>Username</th><th>Role</th><th>Created</th></tr></thead>
+        <tbody>
+          ${users.map((item) => `<tr><td>${escapeHtml(item.username)}</td><td>${escapeHtml(item.role)}</td><td>${escapeHtml(item.createdAt || "")}</td></tr>`).join("")}
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>`;
+}
 
 function decodeEntities(value = "") {
   return value
@@ -264,6 +463,102 @@ async function serveStatic(req, res, pathname) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
+
+  if (url.pathname === "/login" && req.method === "GET") {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+    res.end(renderLogin());
+    return;
+  }
+
+  if (url.pathname === "/login" && req.method === "POST") {
+    const params = new URLSearchParams(await readBody(req));
+    const username = (params.get("username") || "").trim();
+    const password = params.get("password") || "";
+    const store = await loadUsers();
+    const user = store.users.find((item) => item.username === username);
+
+    if (!user || !verifyPassword(password, user.passwordHash)) {
+      res.writeHead(401, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+      res.end(renderLogin("Invalid username or password"));
+      return;
+    }
+
+    const token = crypto.randomBytes(32).toString("hex");
+    sessions.set(token, { username: user.username, createdAt: Date.now() });
+    res.writeHead(302, {
+      location: "/",
+      "set-cookie": `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax`,
+      "cache-control": "no-store"
+    });
+    res.end();
+    return;
+  }
+
+  if (url.pathname === "/logout") {
+    const token = parseCookies(req)[SESSION_COOKIE];
+    if (token) sessions.delete(token);
+    res.writeHead(302, {
+      location: "/login",
+      "set-cookie": `${SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`,
+      "cache-control": "no-store"
+    });
+    res.end();
+    return;
+  }
+
+  const currentUser = await requireUser(req, res);
+  if (!currentUser) {
+    return;
+  }
+
+  if (url.pathname === "/admin" && req.method === "GET") {
+    if (currentUser.role !== "admin") {
+      res.writeHead(403, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+      res.end("Admin access required");
+      return;
+    }
+
+    const store = await loadUsers();
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+    res.end(renderAdmin(currentUser, store.users, url.searchParams.get("message") || ""));
+    return;
+  }
+
+  if (url.pathname === "/admin/users" && req.method === "POST") {
+    if (currentUser.role !== "admin") {
+      res.writeHead(403, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+      res.end("Admin access required");
+      return;
+    }
+
+    const params = new URLSearchParams(await readBody(req));
+    const username = (params.get("username") || "").trim();
+    const password = params.get("password") || "";
+    const role = params.get("role") || "agent";
+    const allowedRoles = new Set(["admin", "agent", "author", "freelancer"]);
+
+    if (!username || !password || !allowedRoles.has(role)) {
+      redirect(res, "/admin?message=Missing or invalid user details");
+      return;
+    }
+
+    const store = await loadUsers();
+    const existing = store.users.find((item) => item.username === username);
+    if (existing) {
+      existing.role = role;
+      existing.passwordHash = hashPassword(password);
+    } else {
+      store.users.push({
+        username,
+        role,
+        passwordHash: hashPassword(password),
+        createdAt: new Date().toISOString()
+      });
+    }
+    await saveUsers();
+    redirect(res, `/admin?message=${encodeURIComponent(existing ? "Login updated" : "Login created")}`);
+    return;
+  }
 
   if (url.pathname === "/api/feeds") {
     res.writeHead(200, {
