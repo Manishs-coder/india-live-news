@@ -10,6 +10,7 @@ const ADMIN_USER = process.env.ADMIN_USER || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const USERS_FILE = process.env.USERS_FILE || path.join(DATA_DIR, "users.json");
+const REWRITES_FILE = process.env.REWRITES_FILE || path.join(DATA_DIR, "rewrites.json");
 const SESSION_COOKIE = "news_session";
 
 const feeds = [
@@ -90,6 +91,7 @@ const mimeTypes = {
 
 const sessions = new Map();
 let usersCache = null;
+let rewritesCache = null;
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>"']/g, (char) => ({
@@ -141,6 +143,24 @@ async function saveUsers() {
   await writeFile(USERS_FILE, JSON.stringify(usersCache, null, 2));
 }
 
+async function loadRewrites() {
+  if (rewritesCache) return rewritesCache;
+
+  try {
+    rewritesCache = JSON.parse(await readFile(REWRITES_FILE, "utf8"));
+  } catch {
+    rewritesCache = { rewrites: [] };
+    await saveRewrites();
+  }
+
+  return rewritesCache;
+}
+
+async function saveRewrites() {
+  await mkdir(path.dirname(REWRITES_FILE), { recursive: true });
+  await writeFile(REWRITES_FILE, JSON.stringify(rewritesCache, null, 2));
+}
+
 function parseCookies(req) {
   return Object.fromEntries((req.headers.cookie || "")
     .split(";")
@@ -156,6 +176,14 @@ async function readBody(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   return Buffer.concat(chunks).toString("utf8");
+}
+
+function sendJson(res, status, payload) {
+  res.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store"
+  });
+  res.end(JSON.stringify(payload));
 }
 
 function redirect(res, location) {
@@ -572,14 +600,64 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/api/news") {
     try {
       const payload = await getNews(url);
-      res.writeHead(200, {
-        "content-type": "application/json; charset=utf-8",
-        "cache-control": "no-store"
-      });
-      res.end(JSON.stringify(payload));
+      sendJson(res, 200, payload);
     } catch (error) {
-      res.writeHead(500, { "content-type": "application/json; charset=utf-8" });
-      res.end(JSON.stringify({ error: error.message }));
+      sendJson(res, 500, { error: error.message });
+    }
+    return;
+  }
+
+  if (url.pathname === "/api/rewrites" && req.method === "GET") {
+    const store = await loadRewrites();
+    const items = [...store.rewrites].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    sendJson(res, 200, { rewrites: items.slice(0, 100) });
+    return;
+  }
+
+  if (url.pathname === "/api/rewrites" && req.method === "POST") {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const title = String(body.title || "").trim();
+      const bodyText = String(body.body || "").trim();
+      const sourceTitle = String(body.sourceTitle || "").trim();
+      const sourceLink = String(body.sourceLink || "").trim();
+      const sourceName = String(body.sourceName || "").trim();
+      const category = String(body.category || "").trim();
+      const image = String(body.image || "").trim();
+
+      if (!title || !bodyText || !sourceLink) {
+        sendJson(res, 400, { error: "Title, body and source link are required" });
+        return;
+      }
+
+      const store = await loadRewrites();
+      const now = new Date().toISOString();
+      const existing = store.rewrites.find((item) => item.sourceLink === sourceLink && item.createdBy === currentUser.username);
+      const rewrite = {
+        id: existing?.id || crypto.randomBytes(10).toString("hex"),
+        title,
+        body: bodyText,
+        sourceTitle,
+        sourceLink,
+        sourceName,
+        category,
+        image,
+        createdBy: existing?.createdBy || currentUser.username,
+        createdRole: existing?.createdRole || currentUser.role,
+        createdAt: existing?.createdAt || now,
+        updatedAt: now
+      };
+
+      if (existing) {
+        Object.assign(existing, rewrite);
+      } else {
+        store.rewrites.push(rewrite);
+      }
+
+      await saveRewrites();
+      sendJson(res, 200, { rewrite });
+    } catch (error) {
+      sendJson(res, 400, { error: "Could not save rewritten story" });
     }
     return;
   }

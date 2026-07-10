@@ -57,13 +57,41 @@
           <div id="newsList" class="news-list" aria-live="polite"></div>
         </div>
 
-        <aside class="briefing" aria-label="Quick briefing">
-          <h2>Quick briefing</h2>
-          <div id="briefingList" class="briefing-list"></div>
+        <aside class="side-stack" aria-label="News workspace">
+          <section class="rewrite-panel" aria-label="Rewrite story">
+            <div class="panel-title">
+              <h2>Rewrite desk</h2>
+              <span id="rewriteStatus">Select a story</span>
+            </div>
+            <form id="rewriteForm" class="rewrite-form">
+              <label>
+                Rewritten headline
+                <input id="rewriteTitle" name="title" placeholder="Write fresh headline..." required>
+              </label>
+              <label>
+                Rewritten story
+                <textarea id="rewriteBody" name="body" rows="8" placeholder="Write the story in your own words..." required></textarea>
+              </label>
+              <label>
+                Source link
+                <input id="rewriteSource" name="source" readonly>
+              </label>
+              <div class="rewrite-actions">
+                <button id="saveRewriteButton" type="submit">Save rewrite</button>
+                <button id="copyRewriteButton" type="button">Copy</button>
+              </div>
+            </form>
+            <div id="savedRewrites" class="saved-rewrites"></div>
+          </section>
+
+          <section class="briefing" aria-label="Quick briefing">
+            <h2>Quick briefing</h2>
+            <div id="briefingList" class="briefing-list"></div>
+          </section>
         </aside>
       </section>
     </main>
 
-    <script src="/app.js?v=source-tabs-stable" type="module"></script>
+    <script src="/app.js?v=rewrite-desk" type="module"></script>
   </body>
 </html>

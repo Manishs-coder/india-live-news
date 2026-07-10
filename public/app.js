@@ -8,12 +8,22 @@ const sourceStrip = document.querySelector("#sourceStrip");
 const headlineCount = document.querySelector("#headlineCount");
 const lastUpdated = document.querySelector("#lastUpdated");
 const activeFilter = document.querySelector("#activeFilter");
+const rewriteForm = document.querySelector("#rewriteForm");
+const rewriteTitle = document.querySelector("#rewriteTitle");
+const rewriteBody = document.querySelector("#rewriteBody");
+const rewriteSource = document.querySelector("#rewriteSource");
+const rewriteStatus = document.querySelector("#rewriteStatus");
+const saveRewriteButton = document.querySelector("#saveRewriteButton");
+const copyRewriteButton = document.querySelector("#copyRewriteButton");
+const savedRewrites = document.querySelector("#savedRewrites");
 
 const AUTO_REFRESH_MS = 30 * 1000;
 let feeds = [];
 let searchTimer;
 let activeCategory = "all";
 let sourceStatusById = new Map();
+let latestItems = [];
+let selectedStory = null;
 
 function relativeTime(isoDate) {
   if (!isoDate) return "Recently";
@@ -72,6 +82,8 @@ function renderSources(sources) {
 }
 
 function renderNews(items) {
+  latestItems = items;
+
   if (!items.length) {
     newsList.innerHTML = `<div class="empty">No matching stories found. Try another source or keyword.</div>`;
     briefingList.innerHTML = `<div class="briefing-item"><a>No briefing yet</a><span>Waiting for matching stories</span></div>`;
@@ -88,6 +100,10 @@ function renderNews(items) {
         </div>
         <h3><a href="${item.link}" target="_blank" rel="noreferrer">${escapeHtml(item.title)}</a></h3>
         <p>${escapeHtml(trimText(item.description, 220))}</p>
+        <div class="story-actions">
+          <button class="rewrite-button" type="button" data-story-id="${escapeHtml(item.id)}">Rewrite</button>
+          <a href="${item.link}" target="_blank" rel="noreferrer">Source</a>
+        </div>
       </div>
       ${item.image ? `<img class="thumbnail" src="${item.image}" alt="">` : ""}
     </article>
@@ -99,6 +115,74 @@ function renderNews(items) {
       <span>${escapeHtml(item.source)} - ${relativeTime(item.publishedAt)}</span>
     </div>
   `).join("");
+}
+
+function selectStoryForRewrite(item) {
+  selectedStory = item;
+  rewriteTitle.value = item.title;
+  rewriteBody.value = item.description;
+  rewriteSource.value = item.link;
+  rewriteStatus.textContent = `${item.source} - ${item.category}`;
+  rewriteTitle.focus();
+}
+
+function rewritePayload() {
+  return {
+    title: rewriteTitle.value.trim(),
+    body: rewriteBody.value.trim(),
+    sourceLink: selectedStory?.link || rewriteSource.value.trim(),
+    sourceTitle: selectedStory?.title || "",
+    sourceName: selectedStory?.source || "",
+    category: selectedStory?.category || "",
+    image: selectedStory?.image || ""
+  };
+}
+
+function formattedRewrite(payload = rewritePayload()) {
+  return `${payload.title}\n\n${payload.body}\n\nSource: ${payload.sourceName || "Original report"}\n${payload.sourceLink}`;
+}
+
+async function loadRewrites() {
+  try {
+    const response = await fetch("/api/rewrites");
+    if (!response.ok) throw new Error("Could not load rewrites");
+    const data = await response.json();
+
+    if (!data.rewrites.length) {
+      savedRewrites.innerHTML = `<div class="empty small">No saved rewrites yet.</div>`;
+      return;
+    }
+
+    savedRewrites.innerHTML = `
+      <h3>Saved rewrites</h3>
+      ${data.rewrites.slice(0, 8).map((item) => `
+        <article class="saved-rewrite">
+          <strong>${escapeHtml(trimText(item.title, 86))}</strong>
+          <span>${escapeHtml(item.createdBy)} - ${new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.updatedAt))}</span>
+          <button type="button" data-copy-rewrite="${escapeHtml(item.id)}">Copy</button>
+        </article>
+      `).join("")}
+    `;
+
+    savedRewrites.querySelectorAll("[data-copy-rewrite]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const item = data.rewrites.find((rewrite) => rewrite.id === button.dataset.copyRewrite);
+        if (!item) return;
+        await navigator.clipboard.writeText(formattedRewrite({
+          title: item.title,
+          body: item.body,
+          sourceName: item.sourceName,
+          sourceLink: item.sourceLink
+        }));
+        button.textContent = "Copied";
+        setTimeout(() => {
+          button.textContent = "Copy";
+        }, 1200);
+      });
+    });
+  } catch {
+    savedRewrites.innerHTML = `<div class="empty small">Saved rewrites could not load.</div>`;
+  }
 }
 
 function updateFeedOptions() {
@@ -153,6 +237,12 @@ sourceStrip.addEventListener("click", (event) => {
   sourceSelect.value = button.dataset.source || "all";
   loadNews(true);
 });
+newsList.addEventListener("click", (event) => {
+  const button = event.target.closest(".rewrite-button[data-story-id]");
+  if (!button) return;
+  const item = latestItems.find((story) => story.id === button.dataset.storyId);
+  if (item) selectStoryForRewrite(item);
+});
 categoryButtons.forEach((button) => {
   button.addEventListener("click", () => {
     activeCategory = button.dataset.category || "all";
@@ -167,6 +257,42 @@ searchInput.addEventListener("input", () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => loadNews(true), 350);
 });
+rewriteForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const payload = rewritePayload();
+  if (!payload.title || !payload.body || !payload.sourceLink) {
+    rewriteStatus.textContent = "Select a story first";
+    return;
+  }
+
+  saveRewriteButton.disabled = true;
+  rewriteStatus.textContent = "Saving...";
+
+  try {
+    const response = await fetch("/api/rewrites", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) throw new Error("Save failed");
+    rewriteStatus.textContent = "Rewrite saved";
+    await loadRewrites();
+  } catch {
+    rewriteStatus.textContent = "Could not save";
+  } finally {
+    saveRewriteButton.disabled = false;
+  }
+});
+copyRewriteButton.addEventListener("click", async () => {
+  const payload = rewritePayload();
+  if (!payload.title || !payload.body || !payload.sourceLink) {
+    rewriteStatus.textContent = "Nothing to copy";
+    return;
+  }
+  await navigator.clipboard.writeText(formattedRewrite(payload));
+  rewriteStatus.textContent = "Copied for website";
+});
 
 loadNews();
+loadRewrites();
 setInterval(() => loadNews(false), AUTO_REFRESH_MS);

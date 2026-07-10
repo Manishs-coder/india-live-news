@@ -9,6 +9,8 @@ Live RSS news dashboard for Indian news and Bollywood sources.
 - Search
 - Auto-refresh
 - Mobile-friendly layout
+- Rewrite desk for authors
+- Saved rewritten stories with copy-ready website text
 
 ## Run locally
 
@@ -47,3 +49,9 @@ Admin users can visit `/admin` to create logins for:
 - admin
 
 For production, set `DATA_DIR` to a persistent folder or database-backed storage so created logins survive server restarts.
+
+## Rewrite workflow
+
+Authors can open the dashboard, click `Rewrite` on any story, rewrite the headline and body in their own words, then save it. Saved rewrites appear in the Rewrite desk and can be copied for posting on a website.
+
+For production, rewrites also need persistent storage through `DATA_DIR`, a Render persistent disk, or a database.
