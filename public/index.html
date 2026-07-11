@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>India Live News</title>
-    <link rel="stylesheet" href="/styles.css?v=source-tabs">
+    <link rel="stylesheet" href="/styles.css?v=rewrite-compare-layout">
   </head>
   <body>
     <header class="topbar">
@@ -68,6 +68,7 @@
                 Rewritten headline
                 <input id="rewriteTitle" name="title" placeholder="Write fresh headline..." required>
               </label>
+              <button id="loadArticleButton" class="secondary-action" type="button">Load full article</button>
               <label>
                 Original/source text
                 <textarea id="originalText" name="original" rows="7" placeholder="Load full article, or paste source text here..."></textarea>
@@ -76,7 +77,6 @@
                 Rewritten story
                 <textarea id="rewriteBody" name="body" rows="8" placeholder="Write the story in your own words..." required></textarea>
               </label>
-              <button id="loadArticleButton" class="secondary-action" type="button">Load full article</button>
               <div id="similarityBox" class="similarity-box">
                 <strong id="similarityScore">Similarity: --</strong>
                 <span id="similarityMessage">Add original and rewritten text to compare.</span>
@@ -109,6 +109,6 @@
       </section>
     </div>
 
-    <script src="/app.js?v=rewrite-desk" type="module"></script>
+    <script src="/app.js?v=rewrite-compare-layout" type="module"></script>
   </body>
 </html>
