@@ -17,6 +17,7 @@ const rewriteStatus = document.querySelector("#rewriteStatus");
 const saveRewriteButton = document.querySelector("#saveRewriteButton");
 const copyRewriteButton = document.querySelector("#copyRewriteButton");
 const loadArticleButton = document.querySelector("#loadArticleButton");
+const startRewriteButton = document.querySelector("#startRewriteButton");
 const savedRewrites = document.querySelector("#savedRewrites");
 const appPopup = document.querySelector("#appPopup");
 const popupTitle = document.querySelector("#popupTitle");
@@ -404,6 +405,15 @@ loadArticleButton.addEventListener("click", async () => {
   } finally {
     loadArticleButton.disabled = false;
   }
+});
+startRewriteButton.addEventListener("click", () => {
+  if (!originalText.value.trim()) {
+    showPopup("Original text needed", "Load full article or paste source text first, then write your rewrite below.");
+    return;
+  }
+
+  rewriteStatus.textContent = "Write the rewritten story below";
+  rewriteBody.focus();
 });
 originalText.addEventListener("input", updateSimilarity);
 rewriteBody.addEventListener("input", updateSimilarity);
