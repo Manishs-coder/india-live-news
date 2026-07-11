@@ -10,6 +10,7 @@ const lastUpdated = document.querySelector("#lastUpdated");
 const activeFilter = document.querySelector("#activeFilter");
 const rewriteForm = document.querySelector("#rewriteForm");
 const rewriteTitle = document.querySelector("#rewriteTitle");
+const originalText = document.querySelector("#originalText");
 const rewriteBody = document.querySelector("#rewriteBody");
 const rewriteSource = document.querySelector("#rewriteSource");
 const rewriteStatus = document.querySelector("#rewriteStatus");
@@ -21,6 +22,8 @@ const appPopup = document.querySelector("#appPopup");
 const popupTitle = document.querySelector("#popupTitle");
 const popupMessage = document.querySelector("#popupMessage");
 const popupCloseButton = document.querySelector("#popupCloseButton");
+const similarityScore = document.querySelector("#similarityScore");
+const similarityMessage = document.querySelector("#similarityMessage");
 
 const AUTO_REFRESH_MS = 30 * 1000;
 let feeds = [];
@@ -64,6 +67,53 @@ function showPopup(title, message) {
 
 function hidePopup() {
   appPopup.hidden = true;
+}
+
+function wordsFromText(text = "") {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\u0900-\u097f\s]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 2);
+}
+
+function shingles(words, size = 4) {
+  const output = new Set();
+  for (let index = 0; index <= words.length - size; index += 1) {
+    output.add(words.slice(index, index + size).join(" "));
+  }
+  return output;
+}
+
+function similarityPercent(original, rewritten) {
+  const originalShingles = shingles(wordsFromText(original));
+  const rewrittenShingles = shingles(wordsFromText(rewritten));
+  if (!originalShingles.size || !rewrittenShingles.size) return 0;
+
+  let overlap = 0;
+  rewrittenShingles.forEach((item) => {
+    if (originalShingles.has(item)) overlap += 1;
+  });
+
+  return Math.round((overlap / rewrittenShingles.size) * 100);
+}
+
+function updateSimilarity() {
+  const percent = similarityPercent(originalText.value, rewriteBody.value);
+  similarityScore.textContent = originalText.value.trim() && rewriteBody.value.trim()
+    ? `Similarity: ${percent}%`
+    : "Similarity: --";
+
+  similarityScore.className = percent >= 45 ? "high" : percent >= 25 ? "medium" : "low";
+  similarityMessage.textContent = !originalText.value.trim() || !rewriteBody.value.trim()
+    ? "Add original and rewritten text to compare."
+    : percent >= 45
+      ? "Too close to source. Rewrite more before saving."
+      : percent >= 25
+        ? "Moderate match. Review wording before publishing."
+        : "Looks different enough for a rewrite check.";
+
+  return percent;
 }
 
 function renderSources(sources) {
@@ -144,9 +194,11 @@ function renderNews(items) {
 function selectStoryForRewrite(item) {
   selectedStory = item;
   rewriteTitle.value = item.title;
-  rewriteBody.value = item.description;
+  originalText.value = item.description;
+  rewriteBody.value = "";
   rewriteSource.value = item.link;
   rewriteStatus.textContent = `${item.source} - ${item.category}`;
+  updateSimilarity();
   rewriteTitle.focus();
 }
 
@@ -154,6 +206,7 @@ function rewritePayload() {
   return {
     title: rewriteTitle.value.trim(),
     body: rewriteBody.value.trim(),
+    originalText: originalText.value.trim(),
     sourceLink: selectedStory?.link || rewriteSource.value.trim(),
     sourceTitle: selectedStory?.title || "",
     sourceName: selectedStory?.source || "",
@@ -290,6 +343,12 @@ rewriteForm.addEventListener("submit", async (event) => {
     return;
   }
 
+  const percent = updateSimilarity();
+  if (payload.originalText && percent >= 45) {
+    showPopup("Rewrite too close", "This rewrite is too similar to the source text. Please change wording and structure before saving.");
+    return;
+  }
+
   saveRewriteButton.disabled = true;
   rewriteStatus.textContent = "Saving...";
 
@@ -335,15 +394,19 @@ loadArticleButton.addEventListener("click", async () => {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Full article not available");
 
-    rewriteBody.value = data.text;
+    originalText.value = data.text;
+    updateSimilarity();
     rewriteStatus.textContent = "Full article loaded";
     rewriteBody.focus();
   } catch (error) {
     rewriteStatus.textContent = error.message;
+    showPopup("Full article unavailable", `${error.message}. You can still rewrite using the RSS summary and source link.`);
   } finally {
     loadArticleButton.disabled = false;
   }
 });
+originalText.addEventListener("input", updateSimilarity);
+rewriteBody.addEventListener("input", updateSimilarity);
 
 loadNews();
 loadRewrites();

@@ -728,6 +728,7 @@ const server = http.createServer(async (req, res) => {
       const body = JSON.parse(await readBody(req));
       const title = String(body.title || "").trim();
       const bodyText = String(body.body || "").trim();
+      const originalText = String(body.originalText || "").trim();
       const sourceTitle = String(body.sourceTitle || "").trim();
       const sourceLink = String(body.sourceLink || "").trim();
       const sourceName = String(body.sourceName || "").trim();
@@ -773,6 +774,7 @@ const server = http.createServer(async (req, res) => {
         id: existing?.id || crypto.randomBytes(10).toString("hex"),
         title,
         body: bodyText,
+        originalText,
         sourceTitle,
         sourceLink,
         sourceName,

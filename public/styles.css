@@ -419,6 +419,37 @@ select {
   font-weight: 800;
 }
 
+.similarity-box {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.similarity-box strong {
+  font-size: 0.9rem;
+}
+
+.similarity-box strong.low {
+  color: var(--ok);
+}
+
+.similarity-box strong.medium {
+  color: #9a6215;
+}
+
+.similarity-box strong.high {
+  color: var(--warn);
+}
+
+.similarity-box span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
 .story-actions {
   margin-top: 12px;
 }

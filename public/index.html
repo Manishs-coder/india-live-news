@@ -69,10 +69,18 @@
                 <input id="rewriteTitle" name="title" placeholder="Write fresh headline..." required>
               </label>
               <label>
+                Original/source text
+                <textarea id="originalText" name="original" rows="7" placeholder="Load full article, or paste source text here..."></textarea>
+              </label>
+              <label>
                 Rewritten story
                 <textarea id="rewriteBody" name="body" rows="8" placeholder="Write the story in your own words..." required></textarea>
               </label>
               <button id="loadArticleButton" class="secondary-action" type="button">Load full article</button>
+              <div id="similarityBox" class="similarity-box">
+                <strong id="similarityScore">Similarity: --</strong>
+                <span id="similarityMessage">Add original and rewritten text to compare.</span>
+              </div>
               <label>
                 Source link
                 <input id="rewriteSource" name="source" readonly>
