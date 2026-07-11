@@ -14,6 +14,7 @@ Live RSS news dashboard for Indian news and Bollywood sources.
 - Authors can save up to 5 rewrites per source per hour
 - Stories already rewritten by any author are marked and blocked for other authors
 - Original vs rewritten text comparison with similarity warning
+- Smart article reader using structured data, article tags and meta fallback
 
 ## Run locally
 

@@ -373,7 +373,70 @@ function isArticleJunk(text = "") {
   return /subscribe|advertisement|read more|follow us|sign in|download.*app|android hindi news apps|ios hindi news apps|stay updated with us|get all india news|अमर उजाला एप डाउनलोड करें|वीडियो विज्ञापन देखें|खबरें लगातार पढ़ने|वेबसाइट पर पढ़ना जारी/i.test(text);
 }
 
+function normalizeArticleText(value = "") {
+  return stripHtml(value)
+    .split(/\n{2,}|(?<=\.)\s+(?=[A-Z"“])/)
+    .map((text) => text.replace(/\s+/g, " ").trim())
+    .filter((text) => text.length > 45)
+    .filter((text) => !isArticleJunk(text))
+    .join("\n\n")
+    .trim();
+}
+
+function collectJsonArticleBodies(value, bodies = []) {
+  if (!value || typeof value !== "object") return bodies;
+
+  if (typeof value.articleBody === "string") bodies.push(value.articleBody);
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectJsonArticleBodies(item, bodies));
+    return bodies;
+  }
+
+  Object.values(value).forEach((item) => collectJsonArticleBodies(item, bodies));
+  return bodies;
+}
+
+function extractStructuredArticleText(html = "") {
+  const scripts = [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+  for (const script of scripts) {
+    try {
+      const json = JSON.parse(decodeEntities(script[1]).trim());
+      const bodies = collectJsonArticleBodies(json);
+      for (const body of bodies) {
+        const text = normalizeArticleText(body);
+        if (text.length > 400) return text;
+      }
+    } catch {
+      // Ignore malformed structured data and continue with other extraction methods.
+    }
+  }
+
+  const articleBodyMatch = html.match(/"articleBody"\s*:\s*"((?:\\.|[^"\\])*)"/i);
+  if (articleBodyMatch) {
+    try {
+      const text = normalizeArticleText(JSON.parse(`"${articleBodyMatch[1]}"`));
+      if (text.length > 400) return text;
+    } catch {
+      const text = normalizeArticleText(articleBodyMatch[1]);
+      if (text.length > 400) return text;
+    }
+  }
+
+  return "";
+}
+
+function extractMetaArticleText(html = "") {
+  const matches = [...html.matchAll(/<meta[^>]+(?:property|name)=["'](?:og:description|twitter:description|description)["'][^>]+content=["']([^"']+)["'][^>]*>/gi)]
+    .map((match) => normalizeArticleText(decodeEntities(match[1])))
+    .filter((text) => text.length > 120 && !isArticleJunk(text));
+
+  return matches[0] || "";
+}
+
 function extractArticleText(html = "") {
+  const structuredText = extractStructuredArticleText(html);
+  if (structuredText) return structuredText;
+
   const candidates = [];
   const articleMatch = html.match(/<article\b[\s\S]*?<\/article>/i);
   if (articleMatch) candidates.push(articleMatch[0]);
@@ -394,7 +457,7 @@ function extractArticleText(html = "") {
     if (text.length > 400 && !isArticleJunk(text)) return text;
   }
 
-  return "";
+  return extractMetaArticleText(html);
 }
 
 function getTag(xml, tag) {
