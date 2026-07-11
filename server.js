@@ -365,6 +365,14 @@ function stripHtml(value = "") {
     .trim();
 }
 
+function isArticleJunk(text = "") {
+  if (/subscription benefits|premium stories|unlock these with subscription|the view from india|first day first show|today'?s cache|science for all|data point|thedge|health matters|the hindu on books|copyright|thg publishing|comments have to be|community guidelines|new commenting platform|vuukle/i.test(text)) {
+    return true;
+  }
+
+  return /subscribe|advertisement|read more|follow us|sign in|download.*app|android hindi news apps|ios hindi news apps|stay updated with us|get all india news|अमर उजाला एप डाउनलोड करें|वीडियो विज्ञापन देखें|खबरें लगातार पढ़ने|वेबसाइट पर पढ़ना जारी/i.test(text);
+}
+
 function extractArticleText(html = "") {
   const candidates = [];
   const articleMatch = html.match(/<article\b[\s\S]*?<\/article>/i);
@@ -379,11 +387,11 @@ function extractArticleText(html = "") {
     const paragraphs = [...candidate.matchAll(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)]
       .map((match) => stripHtml(match[1]))
       .filter((text) => text.length > 45)
-      .filter((text) => !/subscribe|advertisement|read more|follow us|sign in/i.test(text));
+      .filter((text) => !isArticleJunk(text));
 
     const uniqueParagraphs = [...new Set(paragraphs)].slice(0, 18);
     const text = uniqueParagraphs.join("\n\n").trim();
-    if (text.length > 400) return text;
+    if (text.length > 400 && !isArticleJunk(text)) return text;
   }
 
   return "";
